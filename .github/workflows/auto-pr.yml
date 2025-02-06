@@ -99,15 +99,24 @@ jobs:
           PR_NUMBER=${{ steps.create_pr.outputs.pr_number }}
           echo "Reviewing PR #$PR_NUMBER"
 
+          NODE_ENV_VARS=$(echo '{
+            "githubToken": "'"${GITHUB_TOKEN}"'",
+            "geminiApiKey": "'"${GEMINI_API_KEY}"'",
+            "prNumber": "'"${PR_NUMBER}"'",
+            "owner": "'"${GITHUB_REPOSITORY_OWNER}"'",
+            "repo": "'"${GITHUB_REPOSITORY.split('/')[1]}"'"
+          }')
+
           node -e "
             const { Octokit } = require('@octokit/rest');
             const https = require('https');
 
-            const githubToken = process.env.GITHUB_TOKEN;
-            const geminiApiKey = process.env.GEMINI_API_KEY;
-            const prNumber = process.env.PR_NUMBER;
-            const owner = process.env.GITHUB_REPOSITORY_OWNER;
-            const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
+            const env = JSON.parse(process.argv[2]); // Parse the environment variables
+            const githubToken = env.githubToken;
+            const geminiApiKey = env.geminiApiKey;
+            const prNumber = env.prNumber;
+            const owner = env.owner;
+            const repo = env.repo;
 
             async function getDiff(octokit, owner, repo, prNumber) {
               const { data: diff } = await octokit.pulls.get({
@@ -128,7 +137,7 @@ jobs:
               const requestData = JSON.stringify({
                 contents: [{
                   parts: [{
-                    text: `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation.  Focus on practical and actionable suggestions. Be concise. The code diff:\n\${diff}`
+                    text: \`Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation.  Focus on practical and actionable suggestions. Be concise. The code diff:\n\${diff}\`
                   }]
                 }]
               });
@@ -190,10 +199,10 @@ jobs:
                     });
                     console.log('Comment posted to line:', lineNumber);
                   } catch (error) {
-                    console.error('Error posting comment to line:', lineNumber, error);
+                    console.error(\`Error posting comment to line: \${lineNumber}, error: \${error}\`);
                   }
                 } else {
-                  console.warn('Could not find line number for comment:', commentBody);
+                  console.warn(\`Could not find line number for comment: \${commentBody}\`);
                 }
               }
             }
@@ -208,14 +217,13 @@ jobs:
                 await postGitHubComments(octokit, owner, repo, prNumber, geminiReview);
 
               } catch (error) {
-                console.error('Error reviewing pull request:', error);
+                console.error(\`Error reviewing pull request: \${error}\`);
                 process.exit(1);
               }
             }
 
-            process.env.PR_NUMBER = prNumber; // Pass PR number to the script
             main().catch(error => {
               console.error(error);
               process.exit(1);
             });
-          "
+          " "\${NODE_ENV_VARS}"
