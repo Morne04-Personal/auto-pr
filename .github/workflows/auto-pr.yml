@@ -131,32 +131,33 @@ jobs:
                   const genAI = new GoogleGenerativeAI(geminiApiKey);
                   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
-                  const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide Markdown formatting to highlight code snippets. For each issue, include a brief explanation. Focus on practical and actionable suggestions. Be concise. Please return the information as a JSON blob, with the following format:
+                  const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. For each issue, include a brief explanation and mark its severity (info, suggestion, warning, or error). Return the review as a JSON object with an array of comments. Each comment should include the file path, line number in the new version of the file, and the comment text. Format the response exactly like this:
 
                   {
                     "comments": [
                       {
                         "filePath": "path/to/file.js",
                         "lineNumber": 123,
-                        "body": "Potential bug: ...",
-                        "severity": "warning"
+                        "body": "Consider using a more descriptive variable name.",
+                        "severity": "suggestion"
                       }
                     ]
                   }
 
-                  The code diff:\\n${diff}`;
+                  Code diff to review:\\n${diff}`;
                   
                   const result = await model.generateContent({
                     contents: [
                       {
                         role: "user",
-                        parts: [
-                          {
-                            text: prompt
-                          }
-                        ]
+                        parts: [{ text: prompt }]
                       }
-                    ]
+                    ],
+                    generationConfig: {
+                      temperature: 0.7,
+                      topP: 0.8,
+                      topK: 40,
+                    }
                   });
 
                   if (!result?.response) {
@@ -168,8 +169,18 @@ jobs:
                   }
 
                   const responseText = result.response.candidates[0].content.parts[0].text;
-                  console.log("Gemini Review:", responseText);
-                  return responseText;
+                  
+                  // Clean up the response text to ensure valid JSON
+                  const cleanedText = responseText.replace(/^```json\s*|\s*```$/g, "").trim();
+                  
+                  try {
+                    // Validate that the response is parseable JSON
+                    JSON.parse(cleanedText);
+                    return cleanedText;
+                  } catch (parseError) {
+                    console.error("Error parsing Gemini response as JSON:", parseError);
+                    throw new Error("Invalid JSON response from Gemini");
+                  }
                 } catch (error) {
                   console.error("Gemini API Error:", error);
                   throw error;
@@ -178,50 +189,44 @@ jobs:
 
               async function postGitHubComments(octokit, owner, repo, prNumber, geminiReview) {
                 try {
-                  const trimmedReview = geminiReview.trim();
                   let reviewData;
                   
                   try {
-                    // First try parsing directly
-                    reviewData = JSON.parse(trimmedReview);
+                    reviewData = JSON.parse(geminiReview);
                   } catch (error) {
-                    // If direct parsing fails, try removing markdown code fences
-                    const jsonString = trimmedReview
-                      .replace(/^```json\s*/, "")
-                      .replace(/```\s*$/, "");
-                    reviewData = JSON.parse(jsonString);
+                    console.error("Error parsing review JSON:", error);
+                    throw new Error("Invalid review data format");
                   }
 
                   if (!reviewData?.comments?.length) {
-                    console.error("Invalid review data format: 'comments' property missing or empty.");
+                    console.error("No comments found in review data");
                     return;
                   }
 
                   // Transform comments for GitHub review API
                   const comments = reviewData.comments.map(comment => ({
                     path: comment.filePath,
-                    line: comment.lineNumber,
-                    body: `${comment.severity.toUpperCase()}: ${comment.body}`,
+                    line: parseInt(comment.lineNumber, 10),
+                    body: `**${comment.severity.toUpperCase()}:** ${comment.body}`,
                     side: 'RIGHT'
                   }));
 
-                  // Create review with all comments at once
                   try {
-                    await octokit.pulls.createReview({
+                    // Create a single review with all comments
+                    const review = await octokit.pulls.createReview({
                       owner,
                       repo,
                       pull_number: prNumber,
                       event: 'COMMENT',
                       comments: comments,
-                      body: 'Code review performed by Gemini AI'
+                      body: '## Code Review by Gemini AI\n\nI have reviewed the changes and provided inline comments.'
                     });
-                    console.log('Review posted successfully');
-                  } catch (error) {
-                    console.error('Error posting review:', error.message);
-                    
-                    // Fallback: Post comments individually if bulk review fails
-                    console.log('Attempting to post comments individually...');
-                    
+                    console.log('Review created successfully');
+                  } catch (reviewError) {
+                    console.error('Error creating review:', reviewError.message);
+                    console.log('Falling back to individual comments...');
+
+                    // Fallback: Post comments individually
                     const batchSize = 5;
                     for (let i = 0; i < comments.length; i += batchSize) {
                       const batch = comments.slice(i, i + batchSize);
@@ -237,12 +242,11 @@ jobs:
                             side: comment.side
                           });
                           console.log(`Comment posted to line ${comment.line} in ${comment.path}`);
-                        } catch (commentError) {
-                          console.error(`Error posting comment: ${commentError.message}`);
+                        } catch (error) {
+                          console.error(`Error posting comment: ${error.message}`);
                         }
                       }));
                       
-                      // Add a small delay between batches
                       if (i + batchSize < comments.length) {
                         await new Promise(resolve => setTimeout(resolve, 1000));
                       }
@@ -250,8 +254,8 @@ jobs:
                   }
                 } catch (error) {
                   console.error("Error processing review:", error);
-                  // Don't throw the error, allow the workflow to continue
-                  console.log("Continuing workflow despite review processing error");
+                  // Log error but allow workflow to continue
+                  console.log("Continuing workflow despite review error");
                 }
               }
 
