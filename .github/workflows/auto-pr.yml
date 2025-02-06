@@ -27,10 +27,10 @@ jobs:
           PR_EXISTS=$(gh pr list --head "auto-pr/${{ github.sha }}" --state open --json number -q ".[].number" --repo "${{ github.repository }}" | jq -r '. // empty')
 
           if [[ -n "$PR_EXISTS" ]]; then
-            echo "::set-output name=pr_exists::true"
+            echo "pr_exists=true" >> $GITHUB_OUTPUT
             echo "Existing PR found: $PR_EXISTS"
           else
-            echo "::set-output name=pr_exists::false"
+            echo "pr_exists=false" >> $GITHUB_OUTPUT
           fi
         shell: bash
         if: github.event.head_commit.message != null && ! startsWith(github.event.head_commit.message, 'Merge pull request')
@@ -83,7 +83,7 @@ jobs:
           PR_NUMBER=$(echo "$PR_URL" | awk -F'/' '{print $NF}')
 
           echo "PR Number: $PR_NUMBER"
-          echo "::set-output name=pr_number::$PR_NUMBER"
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
         shell: bash
         if: steps.check_pr.outputs.pr_exists == 'false' && github.event.head_commit.message != null && ! startsWith(github.event.head_commit.message, 'Merge pull request')
@@ -110,7 +110,7 @@ jobs:
               const repo = process.env.GITHUB_REPO;
 
               async function getDiff(octokit, owner, repo, prNumber) {
-                try{
+                try {
                   const { data: diff } = await octokit.pulls.get({
                     owner,
                     repo,
@@ -120,20 +120,19 @@ jobs:
                     },
                   });
                   return diff;
-                } catch (error){
+                } catch (error) {
                   console.log("Octokit Error:", error);
                   throw error;
                 }
               }
 
               async function generateGeminiReview(diff) {
-                try{
+                try {
                   const genAI = new GoogleGenerativeAI(geminiApiKey);
                   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
                   const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide Markdown formatting to highlight code snippets. For each issue, include a brief explanation. Focus on practical and actionable suggestions. Be concise. Please return the information as a JSON blob, with the following format:
 
-                  \`\`\`json
                   {
                     "comments": [
                       {
@@ -141,54 +140,31 @@ jobs:
                         "lineNumber": 123,
                         "body": "Potential bug: ...",
                         "severity": "warning"
-                      },
-                      {
-                        "filePath": "path/to/another/file.js",
-                        "lineNumber": 45,
-                        "body": "Consider using a more descriptive variable name.",
-                        "severity": "suggestion"
                       }
                     ]
                   }
-                  \`\`\`
 
                   The code diff:\\n${diff}`;
                   
                   const result = await model.generateContent({
-                     contents: [
-                            {
-                              role: 'user',
-                              parts: [
-                                {
-                                  text: diff,
-                                }
-                              ],
-                            }
+                    contents: [
+                      {
+                        role: "user",
+                        parts: [
+                          {
+                            text: prompt
+                          }
                         ]
+                      }
+                    ]
                   });
-                  console.log("Full Gemini API Response:", JSON.stringify(result, null, 2));
 
-                  // Check if result.response exists
-                  if (!result || !result.response) {
-                    console.error("Gemini API Response Error: Missing 'response' property");
+                  if (!result?.response) {
                     throw new Error("Invalid Gemini API response format: Missing 'response' property");
                   }
 
-                  // Check if result.response.candidates exists and is an array
-                  if (!result.response.candidates || !Array.isArray(result.response.candidates) || !result.response.candidates.length === 0) {
-                    console.error("Gemini API Response Error: No candidates found or invalid format");
-                    throw new Error("Invalid Gemini API response format: Missing candidates");
-                  }
-
-                  // Check if result.response.candidates[0].content exists and has parts
-                  if (!result.response.candidates[0] || !result.response.candidates[0].content || !result.response.candidates[0].content.parts || !Array.isArray(result.response.candidates[0].content.parts) || result.response.candidates[0].content.parts.length === 0) {
-                    console.error("Gemini API Response Error: No content or parts found in the first candidate");
-                    throw new Error("Invalid Gemini API response format: Missing content or parts");
-                  }
-
-                  // Check if result.promptFeedback exists and log it
-                  if (result.promptFeedback) {
-                    console.log("Gemini Prompt Feedback:", JSON.stringify(result.promptFeedback, null, 2));
+                  if (!result.response.candidates?.[0]?.content?.parts?.[0]) {
+                    throw new Error("Invalid Gemini API response format: Missing content");
                   }
 
                   const responseText = result.response.candidates[0].content.parts[0].text;
@@ -196,51 +172,70 @@ jobs:
                   return responseText;
                 } catch (error) {
                   console.error("Gemini API Error:", error);
-                  throw error; // Re-throw to stop the workflow
+                  throw error;
                 }
               }
 
               async function postGitHubComments(octokit, owner, repo, prNumber, geminiReview) {
                 try {
-                    // Trim whitespace and then remove Markdown code fences
-                    const trimmedReview = geminiReview.trim();
-                    const jsonString = trimmedReview.replace(/^```json\r?\n/, '').replace(/\r?\n```$/, '');
+                  const trimmedReview = geminiReview.trim();
+                  let reviewData;
+                  
+                  try {
+                    // First try parsing directly
+                    reviewData = JSON.parse(trimmedReview);
+                  } catch (error) {
+                    // If direct parsing fails, try removing markdown code fences
+                    const jsonString = trimmedReview
+                      .replace(/^```json\s*/, "")
+                      .replace(/```\s*$/, "");
+                    reviewData = JSON.parse(jsonString);
+                  }
 
-                    try {
-                        const reviewData = JSON.parse(jsonString);
+                  if (!reviewData?.comments?.length) {
+                    console.error("Invalid review data format: 'comments' property missing or empty.");
+                    return;
+                  }
 
-                        if (!reviewData || !Array.isArray(reviewData.comments)) {
-                            console.error("Invalid review data format: 'comments' property missing or not an array.");
-                            return;
+                  // Create a review first
+                  const review = await octokit.pulls.createReview({
+                    owner,
+                    repo,
+                    pull_number: prNumber,
+                    event: "COMMENT"
+                  });
+
+                  // Add comments in batches to avoid rate limits
+                  const batchSize = 5;
+                  for (let i = 0; i < reviewData.comments.length; i += batchSize) {
+                    const batch = reviewData.comments.slice(i, i + batchSize);
+                    await Promise.all(batch.map(async (comment) => {
+                      if (comment.filePath && comment.lineNumber && comment.body) {
+                        try {
+                          await octokit.pulls.createReviewComment({
+                            owner,
+                            repo,
+                            pull_number: prNumber,
+                            body: `${comment.severity.toUpperCase()}: ${comment.body}`,
+                            path: comment.filePath,
+                            line: comment.lineNumber,
+                            side: "RIGHT"
+                          });
+                          console.log(`Comment posted to line ${comment.lineNumber} in ${comment.filePath}`);
+                        } catch (error) {
+                          console.error(`Error posting comment: ${error.message}`);
                         }
-
-                        for (const comment of reviewData.comments) {
-                            if (comment.filePath && comment.lineNumber && comment.body) {
-                                try {
-                                    await octokit.pulls.createReviewComment({
-                                        owner,
-                                        repo,
-                                        pull_number: prNumber,
-                                        body: comment.body,
-                                        path: comment.filePath,
-                                        position: comment.lineNumber,
-                                    });
-                                    console.log(`Comment posted to line: ${comment.lineNumber} in ${comment.filePath}`);
-                                } catch (error) {
-                                    console.error(`Error posting comment to line: ${comment.lineNumber} in ${comment.filePath}:`, error);
-                                }
-                            } else {
-                                console.warn("Skipping invalid comment:", comment);
-                            }
-                        }
-                    } catch (parseError) {
-                        console.error("JSON Parsing Error:", parseError);
-                        console.error("Raw Gemini Review (first 100 chars):", trimmedReview.substring(0, 100)); // Log for debugging
-                         console.error("Full Raw Gemini Review :", trimmedReview); // Log for debugging
-
+                      }
+                    }));
+                    
+                    // Add a small delay between batches
+                    if (i + batchSize < reviewData.comments.length) {
+                      await new Promise(resolve => setTimeout(resolve, 1000));
                     }
+                  }
                 } catch (error) {
-                    console.error("Error parsing or processing Gemini review:", error);
+                  console.error("Error processing review:", error);
+                  throw error;
                 }
               }
 
@@ -249,7 +244,6 @@ jobs:
                 const diff = await getDiff(octokit, owner, repo, prNumber);
                 const geminiReview = await generateGeminiReview(diff);
                 await postGitHubComments(octokit, owner, repo, prNumber, geminiReview);
-
               } catch (error) {
                 console.error(`Error reviewing pull request: ${error}`);
                 process.exit(1);
