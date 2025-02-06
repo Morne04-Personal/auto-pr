@@ -131,7 +131,7 @@ jobs:
                   const genAI = new GoogleGenerativeAI(geminiApiKey);
                   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
-                  const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers and file paths where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation. Focus on practical and actionable suggestions. Be concise.  Please return the information as a JSON blob, with the following format:
+                  const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide Markdown formatting to highlight code snippets. For each issue, include a brief explanation. Focus on practical and actionable suggestions. Be concise. Please return the information as a JSON blob, with the following format:
 
                   \`\`\`json
                   {
@@ -153,8 +153,19 @@ jobs:
                   \`\`\`
 
                   The code diff:\\n${diff}`;
-
-                  const result = await model.generateContent();
+                  
+                  const result = await model.generateContent({
+                     contents: [
+                            {
+                              role: 'user',
+                              parts: [
+                                {
+                                  text: diff,
+                                }
+                              ],
+                            }
+                        ]
+                  });
                   console.log("Full Gemini API Response:", JSON.stringify(result, null, 2));
 
                   // Check if result.response exists
