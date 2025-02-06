@@ -24,7 +24,9 @@ jobs:
           node-version: 18
 
       - name: Install Dependencies
-        run: npm install @octokit/rest
+        run: |
+          npm install @octokit/rest
+          npm install @google/generative-ai
 
       - name: Create Pull Request
         id: create_pr
@@ -100,141 +102,10 @@ jobs:
           GITHUB_REPO: ${{ github.event.repository.name }}
         run: |
           echo "Reviewing PR #$PR_NUMBER"
-          echo "---NODE SCRIPT---"
-          echo '
-            const { Octokit } = require("@octokit/rest");
-            const https = require("https");
 
-            const githubToken = process.env.GITHUB_TOKEN;
-            const geminiApiKey = process.env.GEMINI_API_KEY;
-            const prNumber = process.env.PR_NUMBER;
-            const owner = process.env.GITHUB_OWNER;
-            const repo = process.env.GITHUB_REPO;
-
-            async function getDiff(octokit, owner, repo, prNumber) {
-              const { data: diff } = await octokit.pulls.get({
-                owner,
-                repo,
-                pull_number: prNumber,
-                mediaType: {
-                  format: "diff",
-                },
-              });
-              return diff;
-            }
-
-            async function generateGeminiReview(diff) {
-              const model = "gemini-1.5-pro-latest"; // or "gemini-pro" if you don\'t have access to 1.5
-              const apiUrl = `https://generativeai.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
-
-              const requestData = JSON.stringify({
-                contents: [
-                  {
-                    parts: [
-                      {
-                        text: `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers and file paths where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation. Focus on practical and actionable suggestions. Be concise. The code diff:\\n${diff}`,
-                      },
-                    ],
-                  },
-                ],
-              });
-
-              return new Promise((resolve, reject) => {
-                const options = {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                };
-
-                const req = https.request(apiUrl, options, (res) => {
-                  let data = "";
-
-                  res.on("data", (chunk) => {
-                    data += chunk;
-                  });
-
-                  res.on("end", () => {
-                    try {
-                      const responseData = JSON.parse(data);
-                      const reviewText = responseData.candidates[0].content.parts[0].text;
-                      console.log("Gemini Review:", reviewText);
-                      resolve(reviewText);
-                    } catch (error) {
-                      reject(new Error(`Error parsing Gemini response: ${error.message}, raw data: ${data}`));
-                    }
-                  });
-                });
-
-                req.on("error", (error) => {
-                  reject(new Error(`Gemini API request failed: ${error.message}`));
-                });
-
-                req.write(requestData);
-                req.end();
-              });
-            }
-
-            async function postGitHubComments(octokit, owner, repo, prNumber, geminiReview) {
-              const commentRegex = /^(.*?)(Line\\s+\\d+,\\s+.*?):(.*)$/gm;
-              let match;
-              const comments = [];
-
-              while ((match = commentRegex.exec(geminiReview)) !== null) {
-                  const filePath = match[1].trim();
-                  const lineInfo = match[2].trim();
-                  const commentBody = match[3].trim();
-                  const lineNumberMatch = lineInfo.match(/Line\\s+(\\d+)/);
-                  const lineNumber = lineNumberMatch ? parseInt(lineNumberMatch[1]) : null;
-                  comments.push({ filePath, lineNumber, commentBody });
-              }
-              console.log("Parsed Comments:", comments);
-              // Iterate through the comments and post them to the pull request.
-              for (const comment of comments) {
-
-                  if (comment.lineNumber !== null) {
-                    try {
-                      await octokit.pulls.createReviewComment({
-                        owner,
-                        repo,
-                        pull_number: prNumber,
-                        body: comment.commentBody,
-                        path: comment.filePath, // Determine this from the comment body. Needs to be extracted or Gemini can provide it.
-                        position: comment.lineNumber,
-                      });
-                      console.log("Comment posted to line:", comment.lineNumber);
-                    } catch (error) {
-                      console.error(`Error posting comment to line: ${comment.lineNumber}, error: ${error}`);
-                    }
-                  } else {
-                    console.warn(`Could not find line number for comment: ${comment.commentBody}`);
-                  }
-              }
-            }
-
-            async function main() {
-              const octokit = new Octokit({ auth: githubToken });
-
-              try {
-                const diff = await getDiff(octokit, owner, repo, prNumber);
-                const geminiReview = await generateGeminiReview(diff);
-
-                await postGitHubComments(octokit, owner, repo, prNumber, geminiReview);
-              } catch (error) {
-                console.error(`Error reviewing pull request: ${error}`);
-                process.exit(1);
-              }
-            }
-
-            main().catch((error) => {
-              console.error(error);
-              process.exit(1);
-            });
-          '
-          echo "---END NODE SCRIPT---"
           node -e '
             const { Octokit } = require("@octokit/rest");
-            const https = require("https");
+            const { GoogleGenerativeAI } = require("@google/generative-ai");
 
             const githubToken = process.env.GITHUB_TOKEN;
             const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -255,55 +126,20 @@ jobs:
             }
 
             async function generateGeminiReview(diff) {
-              const model = "gemini-1.5-pro-latest"; // or "gemini-pro" if you don\'t have access to 1.5
-              const apiUrl = `https://generativeai.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey}`;
+              const genAI = new GoogleGenerativeAI(geminiApiKey);
+              const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" }); // Or gemini-pro
 
-              const requestData = JSON.stringify({
-                contents: [
-                  {
-                    parts: [
-                      {
-                        text: `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers and file paths where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation. Focus on practical and actionable suggestions. Be concise. The code diff:\\n${diff}`,
-                      },
-                    ],
-                  },
-                ],
-              });
+              const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers and file paths where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation. Focus on practical and actionable suggestions. Be concise. The code diff:\\n${diff}`;
 
-              return new Promise((resolve, reject) => {
-                const options = {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                };
-
-                const req = https.request(apiUrl, options, (res) => {
-                  let data = "";
-
-                  res.on("data", (chunk) => {
-                    data += chunk;
-                  });
-
-                  res.on("end", () => {
-                    try {
-                      const responseData = JSON.parse(data);
-                      const reviewText = responseData.candidates[0].content.parts[0].text;
-                      console.log("Gemini Review:", reviewText);
-                      resolve(reviewText);
-                    } catch (error) {
-                      reject(new Error(`Error parsing Gemini response: ${error.message}, raw data: ${data}`));
-                    }
-                  });
-                });
-
-                req.on("error", (error) => {
-                  reject(new Error(`Gemini API request failed: ${error.message}`));
-                });
-
-                req.write(requestData);
-                req.end();
-              });
+              try {
+                const result = await model.generateContent(prompt);
+                const responseText = result.response.text();
+                console.log("Gemini Review:", responseText);
+                return responseText;
+              } catch (error) {
+                console.error("Gemini API Error:", error);
+                throw error; // Re-throw to stop the workflow
+              }
             }
 
             async function postGitHubComments(octokit, owner, repo, prNumber, geminiReview) {
