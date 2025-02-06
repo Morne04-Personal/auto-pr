@@ -43,29 +43,28 @@ jobs:
           node <<EOF
           const { Octokit } = require("@octokit/rest");
           const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-
+          process.env.COMMIT_MESSAGE = "$COMMIT_MESSAGE"
+          process.env.COMMIT_SHA = "$COMMIT_SHA"
+          process.env.BRANCH_NAME = "$BRANCH_NAME"
           async function createPullRequest() {
             try {
               const owner = process.env.GITHUB_REPOSITORY_OWNER;
               const repo = process.env.GITHUB_REPOSITORY.split('/')[1]; // Extract repo name
-
+  
               const response = await octokit.pulls.create({
                 owner: owner,
                 repo: repo,
                 title: process.env.COMMIT_MESSAGE,
-                head: BRANCH_NAME,
+                head: process.env.BRANCH_NAME,
                 base: 'main',
                 body: `Automated PR for commit ${process.env.COMMIT_SHA}. Commit message: ${process.env.COMMIT_MESSAGE}`,
               });
-
+  
               console.log('Pull request created:', response.data.html_url);
             } catch (error) {
               console.error('Error creating pull request:', error);
             }
           }
-          process.env.COMMIT_MESSAGE = "$COMMIT_MESSAGE"
-          process.env.COMMIT_SHA = "$COMMIT_SHA"
-          process.env.BRANCH_NAME = "$BRANCH_NAME"
-
+          
           createPullRequest();
           EOF
