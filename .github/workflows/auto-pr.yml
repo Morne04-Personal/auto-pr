@@ -60,14 +60,14 @@ jobs:
                 const owner = process.env.GITHUB_REPOSITORY_OWNER;
                 const repo = process.env.GITHUB_REPOSITORY.split("/")[1];
 
-                const response = await octokit.pulls.create({
-                  owner,
-                  repo,
-                  title: process.env.COMMIT_MESSAGE,
-                  head: process.env.BRANCH_NAME,
-                  base: "main",
-                  body: "Automated PR for commit " + process.env.CURRENT_SHA + "\\nCommit message: " + process.env.COMMIT_MESSAGE,
-                });
+const response = await octokit.pulls.create({
+              owner,
+              repo,
+              title: "Test title",
+              head: "test-head",
+              base: 'main',
+              body: 'Automated PR for commit ' + "testSha" + '\\nCommit message: ' + "testMessage",
+            });
 
                 console.log("Pull request created:", response.data.html_url);
               } catch (error) {
