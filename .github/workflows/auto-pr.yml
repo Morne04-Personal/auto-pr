@@ -154,7 +154,7 @@ jobs:
 
                   The code diff:\\n${diff}`;
 
-                  const result = await model.generateContent(prompt);
+                  const result = await model.generateContent();
                   console.log("Full Gemini API Response:", JSON.stringify(result, null, 2));
 
                   // Check if result.response exists
@@ -193,7 +193,7 @@ jobs:
                 try {
                     // Trim whitespace and then remove Markdown code fences
                     const trimmedReview = geminiReview.trim();
-                    const jsonString = trimmedReview.replace(/^```json\n/, '').replace(/\n```$/, '');
+                    const jsonString = trimmedReview.replace(/^```json\r?\n/, '').replace(/\r?\n```$/, '');
 
                     try {
                         const reviewData = JSON.parse(jsonString);
