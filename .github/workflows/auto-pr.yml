@@ -145,7 +145,7 @@ jobs:
                   console.log("Full Gemini API Response:", JSON.stringify(result, null, 2));
 
                   // Check if result.candidates exists and is an array
-                  if (!result || !result.candidates || !Array.isArray(result.candidates) || result.candidates.length === 0) {
+                  if (!result || !Array.isArray(result.candidates) || !result.candidates || result.candidates.length === 0) {
                     console.error("Gemini API Response Error: No candidates found or invalid format");
                     throw new Error("Invalid Gemini API response format: Missing candidates");
                   }
