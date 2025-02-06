@@ -60,14 +60,11 @@ jobs:
           CURRENT_SHA=$(git rev-parse HEAD)
           PREVIOUS_SHA=$(git rev-parse HEAD~1)
 
-          # Get the commit message (first line)
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -n 1)
-          COMMIT_MESSAGE=$(echo "$COMMIT_MESSAGE" | sed 's/[^a-zA-Z0-9_-]/ /g' | tr -s ' ') # Sanitize commit message
           # Create a timestamp for uniqueness
           TIMESTAMP=$(date +%s)
 
           # Create a new branch from the previous commit
-          BRANCH_NAME="auto-pr/${COMMIT_MESSAGE}-$CURRENT_SHA-$TIMESTAMP" # Include sanitized commit message in branch name
+          BRANCH_NAME="auto-pr/$CURRENT_SHA-$TIMESTAMP"
           git checkout -b "$BRANCH_NAME" $PREVIOUS_SHA
 
           # Cherry-pick the current commit onto the new branch
@@ -76,44 +73,16 @@ jobs:
           # Push the branch with the cherry-picked commit
           git push origin "$BRANCH_NAME"
 
-          # Create Pull Request using Node.js
-          PR_NUMBER=$(node -e "
-            process.env.COMMIT_MESSAGE = '$COMMIT_MESSAGE';
-            process.env.BRANCH_NAME = '$BRANCH_NAME';
-            process.env.CURRENT_SHA = '$CURRENT_SHA';
+          # Get the commit message
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
 
-            async function main() {
-              const { Octokit } = await import('@octokit/rest');
-              const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+          # Create Pull Request using gh cli
+          PR_NUMBER=$(gh pr create --title "$COMMIT_MESSAGE" --body "Automated PR for commit $CURRENT_SHA" --head "$BRANCH_NAME" --base main --repo ${{ github.repository }} | awk '{print $NF}' )
 
-              try {
-                const owner = process.env.GITHUB_REPOSITORY_OWNER;
-                const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
-
-                const response = await octokit.pulls.create({
-                  owner,
-                  repo,
-                  title: process.env.COMMIT_MESSAGE,
-                  head: process.env.BRANCH_NAME,
-                  base: 'main',
-                  body: 'Automated PR for commit ' + process.env.CURRENT_SHA + '\\nCommit message: ' + process.env.COMMIT_MESSAGE,
-                });
-
-                console.log('Pull request created:', response.data.html_url);
-                console.log('::set-output name=pr_number::' + response.data.number); // Set output for next step
-                process.exit(0);
-              } catch (error) {
-                console.error('Error creating pull request:', error);
-                process.exit(1);
-              }
-            }
-
-            main().catch((error) => {
-              console.error(error);
-              process.exit(1);
-            });
-          ")
           echo "PR Number: $PR_NUMBER"
+          echo "::set-output name=pr_number::$PR_NUMBER"
+
+        shell: bash
         if: steps.check_pr.outputs.pr_exists == 'false' && github.event.head_commit.message != null && ! startsWith(github.event.head_commit.message, 'Merge pull request')
 
       - name: Review Pull Request with Gemini
