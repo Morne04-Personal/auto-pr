@@ -18,15 +18,34 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check for Existing PR
+        id: check_pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if there is an open PR for the same branch/commit
+          PR_EXISTS=$(gh pr list --head "auto-pr/${{ github.sha }}" --state open --json number -q ".[].number" --repo "${{ github.repository }}" | jq -r '. // empty')
+
+          if [[ -n "$PR_EXISTS" ]]; then
+            echo "::set-output name=pr_exists::true"
+            echo "Existing PR found: $PR_EXISTS"
+          else
+            echo "::set-output name=pr_exists::false"
+          fi
+        shell: bash
+        if: github.event.head_commit.message != null && ! startsWith(github.event.head_commit.message, 'Merge pull request')
+
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 18
+        if: steps.check_pr.outputs.pr_exists == 'false' && github.event.head_commit.message != null && ! startsWith(github.event.head_commit.message, 'Merge pull request')
 
       - name: Install Dependencies
         run: |
           npm install @octokit/rest
           npm install @google/generative-ai
+        if: steps.check_pr.outputs.pr_exists == 'false' && github.event.head_commit.message != null && ! startsWith(github.event.head_commit.message, 'Merge pull request')
 
       - name: Create Pull Request
         id: create_pr
@@ -41,11 +60,14 @@ jobs:
           CURRENT_SHA=$(git rev-parse HEAD)
           PREVIOUS_SHA=$(git rev-parse HEAD~1)
 
+          # Get the commit message (first line)
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -n 1)
+          COMMIT_MESSAGE=$(echo "$COMMIT_MESSAGE" | sed 's/[^a-zA-Z0-9_-]/ /g' | tr -s ' ') # Sanitize commit message
           # Create a timestamp for uniqueness
           TIMESTAMP=$(date +%s)
 
           # Create a new branch from the previous commit
-          BRANCH_NAME="auto-pr/$CURRENT_SHA-$TIMESTAMP"
+          BRANCH_NAME="auto-pr/${COMMIT_MESSAGE}-$CURRENT_SHA-$TIMESTAMP" # Include sanitized commit message in branch name
           git checkout -b "$BRANCH_NAME" $PREVIOUS_SHA
 
           # Cherry-pick the current commit onto the new branch
@@ -53,9 +75,6 @@ jobs:
 
           # Push the branch with the cherry-picked commit
           git push origin "$BRANCH_NAME"
-
-          # Get the commit message
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
 
           # Create Pull Request using Node.js
           PR_NUMBER=$(node -e "
@@ -95,6 +114,7 @@ jobs:
             });
           ")
           echo "PR Number: $PR_NUMBER"
+        if: steps.check_pr.outputs.pr_exists == 'false' && github.event.head_commit.message != null && ! startsWith(github.event.head_commit.message, 'Merge pull request')
 
       - name: Review Pull Request with Gemini
         env:
@@ -137,9 +157,30 @@ jobs:
               async function generateGeminiReview(diff) {
                 try{
                   const genAI = new GoogleGenerativeAI(geminiApiKey);
-                  const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" }); // Or gemini-pro
+                  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
-                  const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers and file paths where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation. Focus on practical and actionable suggestions. Be concise. The code diff:\\n${diff}`;
+                  const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers and file paths where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation. Focus on practical and actionable suggestions. Be concise.  Please return the information as a JSON blob, with the following format:
+
+                  \`\`\`json
+                  {
+                    "comments": [
+                      {
+                        "filePath": "path/to/file.js",
+                        "lineNumber": 123,
+                        "body": "Potential bug: ...",
+                        "severity": "warning"
+                      },
+                      {
+                        "filePath": "path/to/another/file.js",
+                        "lineNumber": 45,
+                        "body": "Consider using a more descriptive variable name.",
+                        "severity": "suggestion"
+                      }
+                    ]
+                  }
+                  \`\`\`
+
+                  The code diff:\\n${diff}`;
 
                   const result = await model.generateContent(prompt);
                   console.log("Full Gemini API Response:", JSON.stringify(result, null, 2));
@@ -155,6 +196,13 @@ jobs:
                     console.error("Gemini API Response Error: No content or parts found in the first candidate");
                     throw new Error("Invalid Gemini API response format: Missing content or parts");
                   }
+
+                    // Check if result.promptFeedback exists and log it
+                    if (result.promptFeedback) {
+                        console.log("Gemini Prompt Feedback:", JSON.stringify(result.promptFeedback, null, 2));
+                    }
+
+
                   const responseText = result.candidates[0].content.parts[0].text;
                   console.log("Gemini Review:", responseText);
                   return responseText;
@@ -165,39 +213,35 @@ jobs:
               }
 
               async function postGitHubComments(octokit, owner, repo, prNumber, geminiReview) {
-                const commentRegex = /^(.*?)(Line\\s+\\d+,\\s+.*?):(.*)$/gm;
-                let match;
-                const comments = [];
+                try {
+                    const reviewData = JSON.parse(geminiReview);
 
-                while ((match = commentRegex.exec(geminiReview)) !== null) {
-                    const filePath = match[1].trim();
-                    const lineInfo = match[2].trim();
-                    const commentBody = match[3].trim();
-                    const lineNumberMatch = lineInfo.match(/Line\\s+(\\d+)/);
-                    const lineNumber = lineNumberMatch ? parseInt(lineNumberMatch[1]) : null;
-                    comments.push({ filePath, lineNumber, commentBody });
-                }
-                console.log("Parsed Comments:", comments);
-                // Iterate through the comments and post them to the pull request.
-                for (const comment of comments) {
-
-                    if (comment.lineNumber !== null) {
-                      try {
-                        await octokit.pulls.createReviewComment({
-                          owner,
-                          repo,
-                          pull_number: prNumber,
-                          body: comment.commentBody,
-                          path: comment.filePath, // Determine this from the comment body. Needs to be extracted or Gemini can provide it.
-                          position: comment.lineNumber,
-                        });
-                        console.log("Comment posted to line:", comment.lineNumber);
-                      } catch (error) {
-                        console.error(`Error posting comment to line: ${comment.lineNumber}, error: ${error}`);
-                      }
-                    } else {
-                      console.warn(`Could not find line number for comment: ${comment.commentBody}`);
+                    if (!reviewData || !Array.isArray(reviewData.comments)) {
+                        console.error("Invalid review data format.");
+                        return;
                     }
+
+                    for (const comment of reviewData.comments) {
+                        if (comment.filePath && comment.lineNumber && comment.body) {
+                            try {
+                                await octokit.pulls.createReviewComment({
+                                    owner,
+                                    repo,
+                                    pull_number: prNumber,
+                                    body: comment.body,
+                                    path: comment.filePath,
+                                    position: comment.lineNumber,
+                                });
+                                console.log(`Comment posted to line: ${comment.lineNumber} in ${comment.filePath}`);
+                            } catch (error) {
+                                console.error(`Error posting comment to line: ${comment.lineNumber} in ${comment.filePath}:`, error);
+                            }
+                        } else {
+                            console.warn("Skipping invalid comment:", comment);
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error parsing or processing Gemini review:", error);
                 }
               }
 
@@ -218,3 +262,4 @@ jobs:
               process.exit(1);
             });
           '
+        if: steps.check_pr.outputs.pr_exists == 'false' && github.event.head_commit.message != null && ! startsWith(github.event.head_commit.message, 'Merge pull request')
