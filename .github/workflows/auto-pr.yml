@@ -167,6 +167,7 @@ jobs:
                   }
 
                   const responseText = result.response.candidates[0].content.parts[0].text;
+                  console.log("Raw Gemini response:", responseText);
                   
                   // Clean up the response text to ensure valid JSON
                   const cleanedText = responseText.replace(/^```json\s*|\s*```$/g, "").trim();
@@ -201,23 +202,90 @@ jobs:
                     return;
                   }
 
+                  // Get the PR details to get the latest commit
+                  const { data: pullRequest } = await octokit.pulls.get({
+                    owner,
+                    repo,
+                    pull_number: prNumber
+                  });
+
+                  // Get the diff to calculate positions
+                  const { data: diff } = await octokit.pulls.get({
+                    owner,
+                    repo,
+                    pull_number: prNumber,
+                    mediaType: {
+                      format: "diff",
+                    },
+                  });
+
+                  // Function to find position in diff
+                  function findPositionInDiff(filePath, line) {
+                    const diffLines = diff.split('\n');
+                    let currentFile = '';
+                    let position = 0;
+                    let lineInFile = 0;
+
+                    for (let i = 0; i < diffLines.length; i++) {
+                      const diffLine = diffLines[i];
+                      
+                      if (diffLine.startsWith('diff --git')) {
+                        currentFile = diffLine.split(' b/')[1];
+                        lineInFile = 0;
+                        continue;
+                      }
+
+                      if (diffLine.startsWith('@@')) {
+                        const match = diffLine.match(/@@ -\d+,?\d* \+(\d+),?\d* @@/);
+                        if (match) {
+                          lineInFile = parseInt(match[1], 10) - 1;
+                        }
+                        position = i;
+                        continue;
+                      }
+
+                      if (!diffLine.startsWith('-')) {
+                        lineInFile++;
+                      }
+
+                      if (currentFile === filePath && lineInFile === line) {
+                        return i;
+                      }
+                    }
+                    return null;
+                  }
+
                   // Transform comments for GitHub review API
-                  const comments = reviewData.comments.map(comment => ({
-                    path: comment.filePath,
-                    line: parseInt(comment.lineNumber, 10),
-                    body: `**${comment.severity.toUpperCase()}:** ${comment.body}`,
-                    side: "RIGHT"
-                  }));
+                  const comments = reviewData.comments.map(comment => {
+                    console.log(`Processing comment for ${comment.filePath}:${comment.lineNumber}`);
+                    const position = findPositionInDiff(comment.filePath, parseInt(comment.lineNumber, 10));
+                    if (position === null) {
+                      console.warn(`Could not find position for comment at ${comment.filePath}:${comment.lineNumber}`);
+                      return null;
+                    }
+                    return {
+                      path: comment.filePath,
+                      position: position,
+                      body: `**${comment.severity.toUpperCase()}:** ${comment.body}`,
+                      commit_id: pullRequest.head.sha
+                    };
+                  }).filter(Boolean);
+
+                  if (comments.length === 0) {
+                    console.warn("No valid comments to post");
+                    return;
+                  }
 
                   try {
                     // Create a single review with all comments
-                    const review = await octokit.pulls.createReview({
+                    await octokit.pulls.createReview({
                       owner,
                       repo,
                       pull_number: prNumber,
+                      commit_id: pullRequest.head.sha,
                       event: "COMMENT",
                       comments: comments,
-                      body: "Code Review by Gemini AI\\n\\nI have reviewed the changes and provided inline comments."
+                      body: "Code Review by Gemini AI\n\nI have reviewed the changes and provided inline comments."
                     });
                     console.log("Review created successfully");
                   } catch (reviewError) {
@@ -235,11 +303,11 @@ jobs:
                             repo,
                             pull_number: prNumber,
                             body: comment.body,
+                            commit_id: comment.commit_id,
                             path: comment.path,
-                            line: comment.line,
-                            side: comment.side
+                            position: comment.position
                           });
-                          console.log(`Comment posted to line ${comment.line} in ${comment.path}`);
+                          console.log(`Comment posted to ${comment.path} at position ${comment.position}`);
                         } catch (error) {
                           console.error(`Error posting comment: ${error.message}`);
                         }
