@@ -1,72 +1,68 @@
 name: Auto Pull Request
 
 on:
-  push:
-    branches:
-      - main
+ push:
+   branches:
+     - main
 
 jobs:
-  create_pr:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+ create_pr:
+   runs-on: ubuntu-latest
+   permissions:
+     contents: write
+     pull-requests: write
+   steps:
+     - name: Checkout code
+       uses: actions/checkout@v3
+       with:
+         fetch-depth: 0
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
+     - name: Set up Node.js
+       uses: actions/setup-node@v3
+       with:
+         node-version: 18
 
-      - name: Install Dependencies
-        run: npm install @octokit/rest
+     - name: Install Dependencies
+       run: npm install @octokit/rest
 
-      - name: Create Pull Request
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          COMMIT_SHA=$(git rev-parse HEAD)
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
-          BRANCH_NAME="auto-pr/$COMMIT_SHA"
+     - name: Create Pull Request
+       env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+       run: |
+         export COMMIT_SHA=$(git rev-parse HEAD)
+         export COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+         export BRANCH_NAME="auto-pr/$COMMIT_SHA"
 
-          git checkout -b "$BRANCH_NAME"
-          git push origin "$BRANCH_NAME"
+         git checkout -b "$BRANCH_NAME"
+         git push origin "$BRANCH_NAME"
 
-          node <<'EOF'
-          process.env.COMMIT_SHA = process.env.COMMIT_SHA || "";
-          process.env.COMMIT_MESSAGE = process.env.COMMIT_MESSAGE || "";
-          process.env.BRANCH_NAME = process.env.BRANCH_NAME || "";
+         node -e "
+         async function main() {
+           const { Octokit } = await import('@octokit/rest');
+           const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
-          async function main() {
-            const { Octokit } = await import('@octokit/rest');
-            const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+           try {
+             const owner = process.env.GITHUB_REPOSITORY_OWNER;
+             const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
+             
+             const response = await octokit.pulls.create({
+               owner,
+               repo,
+               title: process.env.COMMIT_MESSAGE,
+               head: process.env.BRANCH_NAME,
+               base: 'main',
+               body: 'Automated PR for commit ' + process.env.COMMIT_SHA + '\nCommit message: ' + process.env.COMMIT_MESSAGE
+             });
 
-            try {
-              const owner = process.env.GITHUB_REPOSITORY_OWNER;
-              const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
-              
-              const response = await octokit.pulls.create({
-                owner,
-                repo,
-                title: process.env.COMMIT_MESSAGE,
-                head: process.env.BRANCH_NAME,
-                base: 'main',
-                body: 'Automated PR for commit ' + process.env.COMMIT_SHA + '\nCommit message: ' + process.env.COMMIT_MESSAGE
-              });
-
-              console.log('Pull request created:', response.data.html_url);
-            } catch (error) {
-              console.error('Error creating pull request:', error);
-              process.exit(1);
-            }
-          }
-          
-          main().catch(error => {
-            console.error(error);
-            process.exit(1);
-          });
-          EOF
+             console.log('Pull request created:', response.data.html_url);
+           } catch (error) {
+             console.error('Error creating pull request:', error);
+             process.exit(1);
+           }
+         }
+         
+         main().catch(error => {
+           console.error(error);
+           process.exit(1);
+         });
+         "
