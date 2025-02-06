@@ -219,34 +219,42 @@ jobs:
 
               async function postGitHubComments(octokit, owner, repo, prNumber, geminiReview) {
                 try {
-                    // Remove Markdown code fences
-                    const jsonString = geminiReview.replace(/^```json\n/, '').replace(/\n```$/, '');
+                    // Trim whitespace and then remove Markdown code fences
+                    const trimmedReview = geminiReview.trim();
+                    const jsonString = trimmedReview.replace(/^```json\n/, '').replace(/\n```$/, '');
 
-                    const reviewData = JSON.parse(jsonString);
+                    try {
+                        const reviewData = JSON.parse(jsonString);
 
-                    if (!reviewData || !Array.isArray(reviewData.comments)) {
-                        console.error("Invalid review data format.");
-                        return;
-                    }
-
-                    for (const comment of reviewData.comments) {
-                        if (comment.filePath && comment.lineNumber && comment.body) {
-                            try {
-                                await octokit.pulls.createReviewComment({
-                                    owner,
-                                    repo,
-                                    pull_number: prNumber,
-                                    body: comment.body,
-                                    path: comment.filePath,
-                                    position: comment.lineNumber,
-                                });
-                                console.log(`Comment posted to line: ${comment.lineNumber} in ${comment.filePath}`);
-                            } catch (error) {
-                                console.error(`Error posting comment to line: ${comment.lineNumber} in ${comment.filePath}:`, error);
-                            }
-                        } else {
-                            console.warn("Skipping invalid comment:", comment);
+                        if (!reviewData || !Array.isArray(reviewData.comments)) {
+                            console.error("Invalid review data format: 'comments' property missing or not an array.");
+                            return;
                         }
+
+                        for (const comment of reviewData.comments) {
+                            if (comment.filePath && comment.lineNumber && comment.body) {
+                                try {
+                                    await octokit.pulls.createReviewComment({
+                                        owner,
+                                        repo,
+                                        pull_number: prNumber,
+                                        body: comment.body,
+                                        path: comment.filePath,
+                                        position: comment.lineNumber,
+                                    });
+                                    console.log(`Comment posted to line: ${comment.lineNumber} in ${comment.filePath}`);
+                                } catch (error) {
+                                    console.error(`Error posting comment to line: ${comment.lineNumber} in ${comment.filePath}:`, error);
+                                }
+                            } else {
+                                console.warn("Skipping invalid comment:", comment);
+                            }
+                        }
+                    } catch (parseError) {
+                        console.error("JSON Parsing Error:", parseError);
+                        console.error("Raw Gemini Review (first 100 chars):", trimmedReview.substring(0, 100)); // Log for debugging
+                         console.error("Full Raw Gemini Review :", trimmedReview); // Log for debugging
+
                     }
                 } catch (error) {
                     console.error("Error parsing or processing Gemini review:", error);
