@@ -219,7 +219,10 @@ jobs:
 
               async function postGitHubComments(octokit, owner, repo, prNumber, geminiReview) {
                 try {
-                    const reviewData = JSON.parse(geminiReview);
+                    // Remove Markdown code fences
+                    const jsonString = geminiReview.replace(/^```json\n/, '').replace(/\n```$/, '');
+
+                    const reviewData = JSON.parse(jsonString);
 
                     if (!reviewData || !Array.isArray(reviewData.comments)) {
                         console.error("Invalid review data format.");
