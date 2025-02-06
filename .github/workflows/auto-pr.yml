@@ -36,47 +36,51 @@ jobs:
           # Get the current and previous commit SHAs
           CURRENT_SHA=$(git rev-parse HEAD)
           PREVIOUS_SHA=$(git rev-parse HEAD~1)
-          
+
           # Create a new branch from the previous commit
           BRANCH_NAME="auto-pr/$CURRENT_SHA"
           git checkout -b "$BRANCH_NAME" $PREVIOUS_SHA
-          
+
           # Cherry-pick the current commit onto the new branch
           git cherry-pick $CURRENT_SHA
-          
+
           # Push the branch with the cherry-picked commit
           git push origin "$BRANCH_NAME"
-          
+
           # Get the commit message
           COMMIT_MESSAGE=$(git log -1 --pretty=%B)
 
-          node -e "
-          async function main() {
-            const { Octokit } = await import('@octokit/rest');
-            const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+          # Run the Node.js script with environment variables passed in
+          node -e '
+            async function main() {
+              const { Octokit } = await import("@octokit/rest");
+              const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
-            try {
-              const owner = process.env.GITHUB_REPOSITORY_OWNER;
-              const repo = process.env.GITHUB_REPOSITORY.split('/')[1];
-              
-              const response = await octokit.pulls.create({
-                owner,
-                repo,
-                title: process.env.COMMIT_MESSAGE,
-                head: process.env.BRANCH_NAME,
-                base: 'main',
-                body: 'Automated PR for commit ' + process.env.COMMIT_SHA + '\nCommit message: ' + process.env.COMMIT_MESSAGE
-              });
+              try {
+                const owner = process.env.GITHUB_REPOSITORY_OWNER;
+                const repo = process.env.GITHUB_REPOSITORY.split("/")[1];
 
-              console.log('Pull request created:', response.data.html_url);
-            } catch (error) {
-              console.error('Error creating pull request:', error);
-              process.exit(1);
+                const response = await octokit.pulls.create({
+                  owner,
+                  repo,
+                  title: process.env.COMMIT_MESSAGE,
+                  head: process.env.BRANCH_NAME,
+                  base: "main",
+                  body: "Automated PR for commit " + process.env.CURRENT_SHA + "\\nCommit message: " + process.env.COMMIT_MESSAGE,
+                });
+
+                console.log("Pull request created:", response.data.html_url);
+              } catch (error) {
+                console.error("Error creating pull request:", error);
+                process.exit(1);
+              }
             }
-          }
-          
-          main().catch(error => {
-            console.error(error);
-            process.exit(1);
-          });
-          "
+
+            main().catch((error) => {
+              console.error(error);
+              process.exit(1);
+            });
+          ' \
+          COMMIT_MESSAGE="$COMMIT_MESSAGE" \
+          BRANCH_NAME="$BRANCH_NAME" \
+          CURRENT_SHA="$CURRENT_SHA"
