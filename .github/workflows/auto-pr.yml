@@ -41,14 +41,20 @@ jobs:
           CURRENT_SHA=$(git rev-parse HEAD)
           PREVIOUS_SHA=$(git rev-parse HEAD~1)
 
+          # Create a timestamp for uniqueness
+          TIMESTAMP=$(date +%s)
+
           # Create a new branch from the previous commit
-          BRANCH_NAME="auto-pr/$CURRENT_SHA"
+          BRANCH_NAME="auto-pr/$CURRENT_SHA-$TIMESTAMP"
           git checkout -b "$BRANCH_NAME" $PREVIOUS_SHA
 
           # Cherry-pick the current commit onto the new branch
           git cherry-pick $CURRENT_SHA
 
           # Push the branch with the cherry-picked commit
+          git push origin "$BRANCH_NAME"
+
+          # Get the commit message
           COMMIT_MESSAGE=$(git log -1 --pretty=%B)
 
           # Create Pull Request using Node.js
@@ -139,13 +145,13 @@ jobs:
                   console.log("Full Gemini API Response:", JSON.stringify(result, null, 2));
 
                   // Check if result.candidates exists and is an array
-                  if (!result.candidates || !Array.isArray(result.candidates) || result.candidates.length === 0) {
+                  if (!result || !result.candidates || !Array.isArray(result.candidates) || result.candidates.length === 0) {
                     console.error("Gemini API Response Error: No candidates found or invalid format");
                     throw new Error("Invalid Gemini API response format: Missing candidates");
                   }
 
                   // Check if result.candidates[0].content exists and has parts
-                  if (!result.candidates[0].content || !result.candidates[0].content.parts || !Array.isArray(result.candidates[0].content.parts) || result.candidates[0].content.parts.length === 0) {
+                  if (!result.candidates[0] || !result.candidates[0].content || !result.candidates[0].content.parts || !Array.isArray(result.candidates[0].content.parts) || result.candidates[0].content.parts.length === 0) {
                     console.error("Gemini API Response Error: No content or parts found in the first candidate");
                     throw new Error("Invalid Gemini API response format: Missing content or parts");
                   }
