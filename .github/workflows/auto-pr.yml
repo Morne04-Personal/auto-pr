@@ -77,7 +77,10 @@ jobs:
           COMMIT_MESSAGE=$(git log -1 --pretty=%B)
 
           # Create Pull Request using gh cli
-          PR_NUMBER=$(gh pr create --title "$COMMIT_MESSAGE" --body "Automated PR for commit $CURRENT_SHA" --head "$BRANCH_NAME" --base main --repo ${{ github.repository }} | awk '{print $NF}' )
+          PR_URL=$(gh pr create --title "$COMMIT_MESSAGE" --body "Automated PR for commit $CURRENT_SHA" --head "$BRANCH_NAME" --base main --repo ${{ github.repository }})
+
+          # Extract the PR number from the URL
+          PR_NUMBER=$(echo "$PR_URL" | awk -F'/' '{print $NF}')
 
           echo "PR Number: $PR_NUMBER"
           echo "::set-output name=pr_number::$PR_NUMBER"
