@@ -8,6 +8,9 @@ on:
 jobs:
   create_pr:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # This line grants write access to the repository's contents
+      pull-requests: write # This line grants write access to pull requests
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -25,9 +28,9 @@ jobs:
       - name: Create Pull Request
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Important: Use a secret
+          COMMIT_SHA: $(git rev-parse HEAD)
+          COMMIT_MESSAGE: $(git log -1 --pretty=%B)
         run: |
-          COMMIT_SHA=$(git rev-parse HEAD)
-          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
           BRANCH_NAME="auto-pr/$COMMIT_SHA"
 
           # Create a new branch for the PR
@@ -39,20 +42,22 @@ jobs:
           # Use Octokit to create the pull request
           node <<EOF
           const { Octokit } = require("@octokit/rest");
-          const octokit = new Octokit({ auth: '${{ secrets.GITHUB_TOKEN }}' });
+          const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
           async function createPullRequest() {
             try {
               const owner = process.env.GITHUB_REPOSITORY_OWNER;
               const repo = process.env.GITHUB_REPOSITORY.split('/')[1]; // Extract repo name
+              const commitSha = process.env.COMMIT_SHA;
+              const commitMessage = process.env.COMMIT_MESSAGE;
 
               const response = await octokit.pulls.create({
                 owner: owner,
                 repo: repo,
-                title: '$COMMIT_MESSAGE',
+                title: commitMessage,
                 head: '$BRANCH_NAME',
                 base: 'main',
-                body: `Automated PR for commit ${COMMIT_SHA}.  Commit message: ${COMMIT_MESSAGE}`,
+                body: `Automated PR for commit ${commitSha}. Commit message: ${commitMessage}`,
               });
 
               console.log('Pull request created:', response.data.html_url);
