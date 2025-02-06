@@ -197,45 +197,61 @@ jobs:
                     return;
                   }
 
-                  // Create a review first
-                  const review = await octokit.pulls.createReview({
-                    owner,
-                    repo,
-                    pull_number: prNumber,
-                    event: "COMMENT"
-                  });
+                  // Transform comments for GitHub review API
+                  const comments = reviewData.comments.map(comment => ({
+                    path: comment.filePath,
+                    line: comment.lineNumber,
+                    body: `${comment.severity.toUpperCase()}: ${comment.body}`,
+                    side: 'RIGHT'
+                  }));
 
-                  // Add comments in batches to avoid rate limits
-                  const batchSize = 5;
-                  for (let i = 0; i < reviewData.comments.length; i += batchSize) {
-                    const batch = reviewData.comments.slice(i, i + batchSize);
-                    await Promise.all(batch.map(async (comment) => {
-                      if (comment.filePath && comment.lineNumber && comment.body) {
+                  // Create review with all comments at once
+                  try {
+                    await octokit.pulls.createReview({
+                      owner,
+                      repo,
+                      pull_number: prNumber,
+                      event: 'COMMENT',
+                      comments: comments,
+                      body: 'Code review performed by Gemini AI'
+                    });
+                    console.log('Review posted successfully');
+                  } catch (error) {
+                    console.error('Error posting review:', error.message);
+                    
+                    // Fallback: Post comments individually if bulk review fails
+                    console.log('Attempting to post comments individually...');
+                    
+                    const batchSize = 5;
+                    for (let i = 0; i < comments.length; i += batchSize) {
+                      const batch = comments.slice(i, i + batchSize);
+                      await Promise.all(batch.map(async (comment) => {
                         try {
                           await octokit.pulls.createReviewComment({
                             owner,
                             repo,
                             pull_number: prNumber,
-                            body: `${comment.severity.toUpperCase()}: ${comment.body}`,
-                            path: comment.filePath,
-                            line: comment.lineNumber,
-                            side: "RIGHT"
+                            body: comment.body,
+                            path: comment.path,
+                            line: comment.line,
+                            side: comment.side
                           });
-                          console.log(`Comment posted to line ${comment.lineNumber} in ${comment.filePath}`);
-                        } catch (error) {
-                          console.error(`Error posting comment: ${error.message}`);
+                          console.log(`Comment posted to line ${comment.line} in ${comment.path}`);
+                        } catch (commentError) {
+                          console.error(`Error posting comment: ${commentError.message}`);
                         }
+                      }));
+                      
+                      // Add a small delay between batches
+                      if (i + batchSize < comments.length) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                       }
-                    }));
-                    
-                    // Add a small delay between batches
-                    if (i + batchSize < reviewData.comments.length) {
-                      await new Promise(resolve => setTimeout(resolve, 1000));
                     }
                   }
                 } catch (error) {
                   console.error("Error processing review:", error);
-                  throw error;
+                  // Don't throw the error, allow the workflow to continue
+                  console.log("Continuing workflow despite review processing error");
                 }
               }
 
