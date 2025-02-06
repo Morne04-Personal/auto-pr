@@ -98,10 +98,10 @@ jobs:
         run: |
           echo "Reviewing PR #$PR_NUMBER"
 
-          node -e '
+          node -e "
             async function main() {
-              const { Octokit } = await import("@octokit/rest");
-              const { GoogleGenerativeAI } = await import("@google/generative-ai");
+              const { Octokit } = await import('@octokit/rest');
+              const { GoogleGenerativeAI } = await import('@google/generative-ai');
 
               const githubToken = process.env.GITHUB_TOKEN;
               const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -116,12 +116,12 @@ jobs:
                     repo,
                     pull_number: prNumber,
                     mediaType: {
-                      format: "diff",
+                      format: 'diff',
                     },
                   });
                   return diff;
                 } catch (error) {
-                  console.log("Octokit Error:", error);
+                  console.log('Octokit Error:', error);
                   throw error;
                 }
               }
@@ -129,54 +129,52 @@ jobs:
               async function generateGeminiReview(diff) {
                 try {
                   const genAI = new GoogleGenerativeAI(geminiApiKey);
-                  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+                  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
 
-                  const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. For each issue, include a brief explanation and mark its severity (info, suggestion, warning, or error). Return the review as a JSON object with an array of comments. Each comment should include the file path, line number in the new version of the file, and the comment text. Format the response exactly like this:
+                  const prompt = \`Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. For each issue, include a brief explanation and mark its severity (info, suggestion, warning, or error). Return the review as a JSON object with an array of comments. Each comment should include the file path, line number in the new version of the file, and the comment text. Format the response exactly like this:
                   {
-                    "comments": [
+                    \"comments\": [
                       {
-                        "filePath": "path/to/file.js",
-                        "lineNumber": 123,
-                        "body": "Consider using a more descriptive variable name.",
-                        "severity": "suggestion"
+                        \"filePath\": \"path/to/file.js\",
+                        \"lineNumber\": 123,
+                        \"body\": \"Consider using a more descriptive variable name.\",
+                        \"severity\": \"suggestion\"
                       }
                     ]
                   }
-                  Code diff to review:\\n${diff}`;
+                  Code diff to review:\\n\${diff}\`;
                   
                   const result = await model.generateContent({
                     contents: [
                       {
-                        role: "user",
+                        role: 'user',
                         parts: [{ text: prompt }]
                       }
                     ]
                   });
 
                   if (!result?.response) {
-                    throw new Error("Invalid Gemini API response format: Missing response property");
+                    throw new Error('Invalid Gemini API response format: Missing response property');
                   }
 
                   if (!result.response.candidates?.[0]?.content?.parts?.[0]) {
-                    throw new Error("Invalid Gemini API response format: Missing content");
+                    throw new Error('Invalid Gemini API response format: Missing content');
                   }
 
                   const responseText = result.response.candidates[0].content.parts[0].text;
-                  console.log("Raw Gemini response:", responseText);
+                  console.log('Raw Gemini response:', responseText);
                   
-                  // Clean up the response text to ensure valid JSON
-                  const cleanedText = responseText.replace(/^```json\s*|\s*```$/g, "").trim();
+                  const cleanedText = responseText.replace(/^```json\\s*|\\s*```$/g, '').trim();
                   
                   try {
-                    // Validate that the response is parseable JSON
                     JSON.parse(cleanedText);
                     return cleanedText;
                   } catch (parseError) {
-                    console.error("Error parsing Gemini response as JSON:", parseError);
-                    throw new Error("Invalid JSON response from Gemini");
+                    console.error('Error parsing Gemini response as JSON:', parseError);
+                    throw new Error('Invalid JSON response from Gemini');
                   }
                 } catch (error) {
-                  console.error("Gemini API Error:", error);
+                  console.error('Gemini API Error:', error);
                   throw error;
                 }
               }
@@ -188,106 +186,108 @@ jobs:
                   try {
                     reviewData = JSON.parse(geminiReview);
                   } catch (error) {
-                    console.error("Error parsing review JSON:", error);
-                    throw new Error("Invalid review data format");
+                    console.error('Error parsing review JSON:', error);
+                    throw new Error('Invalid review data format');
                   }
 
                   if (!reviewData?.comments?.length) {
-                    console.error("No comments found in review data");
+                    console.error('No comments found in review data');
                     return;
                   }
 
-                  // Get the PR details to get the latest commit
                   const { data: pullRequest } = await octokit.pulls.get({
                     owner,
                     repo,
                     pull_number: prNumber
                   });
 
-                  // Get the diff to calculate positions
-                  const { data: diff } = await octokit.pulls.get({
+                  const { data: diffData } = await octokit.pulls.get({
                     owner,
                     repo,
                     pull_number: prNumber,
                     mediaType: {
-                      format: "diff",
+                      format: 'diff',
                     },
                   });
 
-                  // Function to find position in diff
                   function findPositionInDiff(filePath, line) {
-                    const diffLines = diff.split('\n');
+                    const diffLines = diffData.split('\\n');
                     let currentFile = '';
-                    let position = 0;
+                    let hunkPos = null;
                     let lineInFile = 0;
+                    let relativePos = 0;
 
                     for (let i = 0; i < diffLines.length; i++) {
                       const diffLine = diffLines[i];
                       
-                      if (diffLine.startsWith('diff --git')) {
-                        currentFile = diffLine.split(' b/')[1];
-                        lineInFile = 0;
-                        continue;
-                      }
-
-                      if (diffLine.startsWith('@@')) {
-                        const match = diffLine.match(/@@ -\d+,?\d* \+(\d+),?\d* @@/);
-                        if (match) {
-                          lineInFile = parseInt(match[1], 10) - 1;
+                      if (diffLine.indexOf('diff --git') === 0) {
+                        const parts = diffLine.split(' b/');
+                        if (parts.length > 1) {
+                          currentFile = parts[1];
+                          lineInFile = 0;
+                          hunkPos = null;
+                          relativePos = 0;
                         }
-                        position = i;
                         continue;
                       }
 
-                      if (!diffLine.startsWith('-')) {
-                        lineInFile++;
+                      if (diffLine.indexOf('@@') === 0) {
+                        const match = diffLine.match(/@@ -(\\d+),?(\\d+)? \\+(\\d+),?(\\d+)? @@/);
+                        if (match) {
+                          lineInFile = parseInt(match[3], 10) - 1;
+                          hunkPos = i;
+                          relativePos = 0;
+                        }
+                        continue;
                       }
 
-                      if (currentFile === filePath && lineInFile === line) {
-                        return i;
+                      if (diffLine[0] !== '-') {
+                        lineInFile++;
+                        relativePos++;
+                      }
+
+                      if (currentFile === filePath && lineInFile === line && hunkPos !== null) {
+                        return relativePos;
                       }
                     }
                     return null;
                   }
 
-                  // Transform comments for GitHub review API
                   const comments = reviewData.comments.map(comment => {
-                    console.log(`Processing comment for ${comment.filePath}:${comment.lineNumber}`);
+                    console.log(\`Processing comment for \${comment.filePath}:\${comment.lineNumber}\`);
                     const position = findPositionInDiff(comment.filePath, parseInt(comment.lineNumber, 10));
                     if (position === null) {
-                      console.warn(`Could not find position for comment at ${comment.filePath}:${comment.lineNumber}`);
+                      console.warn(\`Could not find position for comment at \${comment.filePath}:\${comment.lineNumber}\`);
                       return null;
                     }
                     return {
                       path: comment.filePath,
                       position: position,
-                      body: `**${comment.severity.toUpperCase()}:** ${comment.body}`,
+                      body: \`**\${comment.severity.toUpperCase()}:** \${comment.body}\`,
                       commit_id: pullRequest.head.sha
                     };
                   }).filter(Boolean);
 
                   if (comments.length === 0) {
-                    console.warn("No valid comments to post");
+                    console.warn('No valid comments to post');
                     return;
                   }
 
                   try {
-                    // Create a single review with all comments
                     await octokit.pulls.createReview({
                       owner,
                       repo,
                       pull_number: prNumber,
                       commit_id: pullRequest.head.sha,
-                      event: "COMMENT",
+                      event: 'COMMENT',
                       comments: comments,
-                      body: "Code Review by Gemini AI\n\nI have reviewed the changes and provided inline comments."
+                      body: 'Code Review by Gemini AI\\n\\nI have reviewed the changes and provided inline comments.'
                     });
-                    console.log("Review created successfully");
+                    console.log('Review created successfully');
                   } catch (reviewError) {
-                    console.error("Error creating review:", reviewError.message);
-                    console.log("Falling back to individual comments...");
+                    console.error('Error creating review:', reviewError.message);
+                    console.log('Falling back to individual comments...');
 
-                    // Fallback: Post comments individually
                     const batchSize = 5;
                     for (let i = 0; i < comments.length; i += batchSize) {
                       const batch = comments.slice(i, i + batchSize);
@@ -302,9 +302,9 @@ jobs:
                             path: comment.path,
                             position: comment.position
                           });
-                          console.log(`Comment posted to ${comment.path} at position ${comment.position}`);
+                          console.log(\`Comment posted to \${comment.path} at position \${comment.position}\`);
                         } catch (error) {
-                          console.error(`Error posting comment: ${error.message}`);
+                          console.error(\`Error posting comment: \${error.message}\`);
                         }
                       }));
                       
@@ -314,9 +314,8 @@ jobs:
                     }
                   }
                 } catch (error) {
-                  console.error("Error processing review:", error);
-                  // Log error but allow workflow to continue
-                  console.log("Continuing workflow despite review error");
+                  console.error('Error processing review:', error);
+                  console.log('Continuing workflow despite review error');
                 }
               }
 
@@ -326,7 +325,7 @@ jobs:
                 const geminiReview = await generateGeminiReview(diff);
                 await postGitHubComments(octokit, owner, repo, prNumber, geminiReview);
               } catch (error) {
-                console.error(`Error reviewing pull request: ${error}`);
+                console.error(\`Error reviewing pull request: \${error}\`);
                 process.exit(1);
               }
             }
@@ -335,5 +334,5 @@ jobs:
               console.error(error);
               process.exit(1);
             });
-          '
+          "
         if: steps.check_pr.outputs.pr_exists == 'false' && github.event.head_commit.message != null && ! startsWith(github.event.head_commit.message, 'Merge pull request')
