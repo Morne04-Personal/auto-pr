@@ -127,14 +127,14 @@ jobs:
               }
 
               async function generateGeminiReview(diff) {
-                const genAI = new GoogleGenerativeAI.GoogleGenerativeAI(geminiApiKey);
+                const genAI = new GoogleGenerativeAI(geminiApiKey);
                 const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro-latest" }); // Or gemini-pro
 
                 const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers and file paths where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation. Focus on practical and actionable suggestions. Be concise. The code diff:\\n${diff}`;
 
                 try {
                   const result = await model.generateContent(prompt);
-                  const responseText = result.response.text();
+                  const responseText = result.candidates[0].content.parts[0].text;
                   console.log("Gemini Review:", responseText);
                   return responseText;
                 } catch (error) {
