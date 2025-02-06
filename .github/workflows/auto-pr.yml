@@ -132,7 +132,6 @@ jobs:
                   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
                   const prompt = `Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. For each issue, include a brief explanation and mark its severity (info, suggestion, warning, or error). Return the review as a JSON object with an array of comments. Each comment should include the file path, line number in the new version of the file, and the comment text. Format the response exactly like this:
-
                   {
                     "comments": [
                       {
@@ -143,7 +142,6 @@ jobs:
                       }
                     ]
                   }
-
                   Code diff to review:\\n${diff}`;
                   
                   const result = await model.generateContent({
@@ -161,7 +159,7 @@ jobs:
                   });
 
                   if (!result?.response) {
-                    throw new Error("Invalid Gemini API response format: Missing 'response' property");
+                    throw new Error("Invalid Gemini API response format: Missing response property");
                   }
 
                   if (!result.response.candidates?.[0]?.content?.parts?.[0]) {
@@ -208,7 +206,7 @@ jobs:
                     path: comment.filePath,
                     line: parseInt(comment.lineNumber, 10),
                     body: `**${comment.severity.toUpperCase()}:** ${comment.body}`,
-                    side: 'RIGHT'
+                    side: "RIGHT"
                   }));
 
                   try {
@@ -217,14 +215,14 @@ jobs:
                       owner,
                       repo,
                       pull_number: prNumber,
-                      event: 'COMMENT',
+                      event: "COMMENT",
                       comments: comments,
-                      body: '## Code Review by Gemini AI\n\nI have reviewed the changes and provided inline comments.'
+                      body: "Code Review by Gemini AI\\n\\nI have reviewed the changes and provided inline comments."
                     });
-                    console.log('Review created successfully');
+                    console.log("Review created successfully");
                   } catch (reviewError) {
-                    console.error('Error creating review:', reviewError.message);
-                    console.log('Falling back to individual comments...');
+                    console.error("Error creating review:", reviewError.message);
+                    console.log("Falling back to individual comments...");
 
                     // Fallback: Post comments individually
                     const batchSize = 5;
