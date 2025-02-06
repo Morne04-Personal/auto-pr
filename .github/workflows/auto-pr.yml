@@ -99,12 +99,15 @@ jobs:
           PR_NUMBER=${{ steps.create_pr.outputs.pr_number }}
           echo "Reviewing PR #$PR_NUMBER"
 
+          GITHUB_REPO_FULL="${GITHUB_REPOSITORY}"
+          REPO_NAME=$(echo "$GITHUB_REPO_FULL" | cut -d'/' -f2)
+
           NODE_ENV_VARS=$(echo '{
             "githubToken": "'"${GITHUB_TOKEN}"'",
             "geminiApiKey": "'"${GEMINI_API_KEY}"'",
             "prNumber": "'"${PR_NUMBER}"'",
             "owner": "'"${GITHUB_REPOSITORY_OWNER}"'",
-            "repo": "'"${GITHUB_REPOSITORY.split('/')[1]}"'"
+            "repo": "'"${REPO_NAME}"'"
           }')
 
           node -e "
@@ -137,7 +140,7 @@ jobs:
               const requestData = JSON.stringify({
                 contents: [{
                   parts: [{
-                    text: \`Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation.  Focus on practical and actionable suggestions. Be concise. The code diff:\n\${diff}\`
+                    text: \`Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Provide specific line numbers where problems are found. Use Markdown formatting to highlight code snippets. For each issue, include a brief explanation.  Focus on practical and actionable suggestions. Be concise. The code diff:\\n\${diff}\`
                   }]
                 }]
               });
