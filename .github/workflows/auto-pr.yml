@@ -28,9 +28,9 @@ jobs:
       - name: Create Pull Request
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Important: Use a secret
-          COMMIT_SHA: $(git rev-parse HEAD)
-          COMMIT_MESSAGE: $(git log -1 --pretty=%B)
         run: |
+          COMMIT_SHA=$(git rev-parse HEAD)
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
           BRANCH_NAME="auto-pr/$COMMIT_SHA"
 
           # Create a new branch for the PR
@@ -48,16 +48,14 @@ jobs:
             try {
               const owner = process.env.GITHUB_REPOSITORY_OWNER;
               const repo = process.env.GITHUB_REPOSITORY.split('/')[1]; // Extract repo name
-              const commitSha = process.env.COMMIT_SHA;
-              const commitMessage = process.env.COMMIT_MESSAGE;
 
               const response = await octokit.pulls.create({
                 owner: owner,
                 repo: repo,
-                title: commitMessage,
-                head: '$BRANCH_NAME',
+                title: process.env.COMMIT_MESSAGE,
+                head: BRANCH_NAME,
                 base: 'main',
-                body: `Automated PR for commit ${commitSha}. Commit message: ${commitMessage}`,
+                body: `Automated PR for commit ${process.env.COMMIT_SHA}. Commit message: ${process.env.COMMIT_MESSAGE}`,
               });
 
               console.log('Pull request created:', response.data.html_url);
@@ -65,6 +63,9 @@ jobs:
               console.error('Error creating pull request:', error);
             }
           }
+          process.env.COMMIT_MESSAGE = "$COMMIT_MESSAGE"
+          process.env.COMMIT_SHA = "$COMMIT_SHA"
+          process.env.BRANCH_NAME = "$BRANCH_NAME"
 
           createPullRequest();
           EOF
