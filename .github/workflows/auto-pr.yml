@@ -176,41 +176,41 @@ jobs:
             }
 
             async function postGitHubComments(octokit, owner, repo, prNumber, geminiReview) {
-            const commentRegex = /^(.*?)(Line\s+\d+,\s+.*?):(.*)$/gm;
-            let match;
-            const comments = [];
+              const commentRegex = /^(.*?)(Line\\s+\\d+,\\s+.*?):(.*)$/gm;
+              let match;
+              const comments = [];
 
-            while ((match = commentRegex.exec(geminiReview)) !== null) {
-                const filePath = match[1].trim();
-                const lineInfo = match[2].trim();
-                const commentBody = match[3].trim();
-                const lineNumberMatch = lineInfo.match(/Line\s+(\d+)/);
-                const lineNumber = lineNumberMatch ? parseInt(lineNumberMatch[1]) : null;
-                comments.push({ filePath, lineNumber, commentBody });
-            }
-            console.log("Parsed Comments:", comments);
-            // Iterate through the comments and post them to the pull request.
-            for (const comment of comments) {
+              while ((match = commentRegex.exec(geminiReview)) !== null) {
+                  const filePath = match[1].trim();
+                  const lineInfo = match[2].trim();
+                  const commentBody = match[3].trim();
+                  const lineNumberMatch = lineInfo.match(/Line\\s+(\\d+)/);
+                  const lineNumber = lineNumberMatch ? parseInt(lineNumberMatch[1]) : null;
+                  comments.push({ filePath, lineNumber, commentBody });
+              }
+              console.log("Parsed Comments:", comments);
+              // Iterate through the comments and post them to the pull request.
+              for (const comment of comments) {
 
-                if (comment.lineNumber !== null) {
-                  try {
-                    await octokit.pulls.createReviewComment({
-                      owner,
-                      repo,
-                      pull_number: prNumber,
-                      body: comment.commentBody,
-                      path: comment.filePath, // Determine this from the comment body. Needs to be extracted or Gemini can provide it.
-                      position: comment.lineNumber,
-                    });
-                    console.log("Comment posted to line:", comment.lineNumber);
-                  } catch (error) {
-                    console.error(`Error posting comment to line: ${comment.lineNumber}, error: ${error}`);
+                  if (comment.lineNumber !== null) {
+                    try {
+                      await octokit.pulls.createReviewComment({
+                        owner,
+                        repo,
+                        pull_number: prNumber,
+                        body: comment.commentBody,
+                        path: comment.filePath, // Determine this from the comment body. Needs to be extracted or Gemini can provide it.
+                        position: comment.lineNumber,
+                      });
+                      console.log("Comment posted to line:", comment.lineNumber);
+                    } catch (error) {
+                      console.error(`Error posting comment to line: ${comment.lineNumber}, error: ${error}`);
+                    }
+                  } else {
+                    console.warn(`Could not find line number for comment: ${comment.commentBody}`);
                   }
-                } else {
-                  console.warn(`Could not find line number for comment: ${comment.commentBody}`);
-                }
+              }
             }
-        }
 
             async function main() {
               const octokit = new Octokit({ auth: githubToken });
