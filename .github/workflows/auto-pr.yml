@@ -9,6 +9,7 @@ jobs:
   create_pr_and_review:
     runs-on: ubuntu-latest
     permissions:
+      contents: write
       pull-requests: write
 
     steps:
