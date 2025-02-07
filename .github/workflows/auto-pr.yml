@@ -225,51 +225,65 @@ jobs:
                     },
                   });
 
-                  function findPositionInDiff(filePath, line) {
-                    const diffLines = diffData.split("\\n");
-                    let currentFile = "";
-                    let lineInFile = 0;
-                    let currentPosition = -1;
-                    let lastHunkHeader = -1;
+                  async function findPositionInDiff(filePath, line) {
+                    try {
+                      const { data: fileDiff } = await octokit.pulls.get({
+                        owner,
+                        repo,
+                        pull_number: prNumber,
+                        mediaType: {
+                          format: "diff",
+                        },
+                      });
 
-                    for (let i = 0; i < diffLines.length; i++) {
-                      const diffLine = diffLines[i];
-                      
-                      if (diffLine.startsWith("diff --git")) {
-                        if (diffLine.endsWith(filePath)) {
-                          currentFile = filePath;
-                          lineInFile = 0;
-                          currentPosition = -1;
-                        } else {
-                          currentFile = "";
-                        }
-                        continue;
-                      }
+                      const diffLines = fileDiff.split("\\n");
+                      let currentFile = "";
+                      let lineInFile = 0;
+                      let currentPosition = -1;
+                      let lastHunkHeader = -1;
 
-                      if (currentFile === filePath) {
-                        if (diffLine.startsWith("@@")) {
-                          const match = diffLine.match(/@@ -\\d+(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@/);
-                          if (match) {
-                            lineInFile = parseInt(match[1], 10) - 1;
-                            lastHunkHeader = i;
-                            currentPosition = 0;
+                      for (let i = 0; i < diffLines.length; i++) {
+                        const diffLine = diffLines[i];
+
+                        if (diffLine.startsWith("diff --git")) {
+                          if (diffLine.includes(filePath)) {
+                            currentFile = filePath;
+                            lineInFile = 0;
+                            currentPosition = -1;
+                          } else {
+                            currentFile = "";
                           }
                           continue;
                         }
 
-                        if (currentPosition !== -1) {
-                          if (!diffLine.startsWith("-")) {
-                            lineInFile++;
-                            currentPosition++;
+                        if (currentFile === filePath) {
+                          if (diffLine.startsWith("@@")) {
+                            const match = diffLine.match(/@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@/);
+                            if (match) {
+                              lineInFile = parseInt(match[2], 10) - 1;
+                              lastHunkHeader = i;
+                              currentPosition = 0;
+                            }
+                            continue;
                           }
 
-                          if (lineInFile === line) {
-                            return currentPosition;
+                          if (currentPosition !== -1) {
+                            if (!diffLine.startsWith("-")) {
+                              lineInFile++;
+                              currentPosition++;
+                            }
+
+                            if (lineInFile === line) {
+                              return currentPosition;
+                            }
                           }
                         }
                       }
+                      return null;
+                    } catch (error) {
+                      console.error("Error finding position in diff:", error);
+                      return null;
                     }
-                    return null;
                   }
 
                   const comments = reviewData.comments.map(comment => {
