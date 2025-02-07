@@ -240,13 +240,12 @@ jobs:
                       let currentFile = "";
                       let lineInFile = 0;
                       let currentPosition = -1;
-                      let lastHunkHeader = -1;
 
                       for (let i = 0; i < diffLines.length; i++) {
                         const diffLine = diffLines[i];
 
                         if (diffLine.startsWith("diff --git")) {
-                          if (diffLine.includes(filePath)) {
+                          if (diffLine.endsWith(filePath)) {
                             currentFile = filePath;
                             lineInFile = 0;
                             currentPosition = -1;
@@ -261,10 +260,9 @@ jobs:
                             const match = diffLine.match(/@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@/);
                             if (match) {
                               lineInFile = parseInt(match[2], 10) - 1;
-                              lastHunkHeader = i;
                               currentPosition = 0;
+                              continue;
                             }
-                            continue;
                           }
 
                           if (currentPosition !== -1) {
@@ -279,6 +277,7 @@ jobs:
                           }
                         }
                       }
+                      console.log(`Could not find position for comment at ${filePath}:${line}`);
                       return null;
                     } catch (error) {
                       console.error("Error finding position in diff:", error);
