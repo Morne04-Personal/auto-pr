@@ -245,7 +245,7 @@ jobs:
                         const diffLine = diffLines[i];
 
                         if (diffLine.startsWith("diff --git")) {
-                          if (diffLine.endsWith(filePath)) {
+                          if (diffLine.includes(filePath)) {
                             currentFile = filePath;
                             lineInFile = 0;
                             currentPosition = -1;
@@ -265,15 +265,13 @@ jobs:
                             }
                           }
 
-                          if (currentPosition !== -1) {
-                            if (!diffLine.startsWith("-")) {
-                              lineInFile++;
-                              currentPosition++;
-                            }
+                          if (!diffLine.startsWith("-")) {
+                            lineInFile++;
+                            currentPosition++;
+                          }
 
-                            if (lineInFile === line) {
-                              return currentPosition;
-                            }
+                          if (lineInFile === line) {
+                            return currentPosition;
                           }
                         }
                       }
