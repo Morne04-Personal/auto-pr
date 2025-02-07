@@ -164,24 +164,29 @@ jobs:
 
                   const responseText = result.response.candidates[0].content.parts[0].text;
                   console.log("Raw Gemini response:", responseText);
-                  
-                  // Try parsing the response directly first
-                  try {
-                    JSON.parse(responseText.trim());
-                    return responseText.trim();
-                  } catch (directParseError) {
-                    // If direct parsing fails, try to extract JSON
-                    const jsonRegex = /{[\s\S]*}/gm;
-                    const jsonMatch = responseText.match(jsonRegex);
-                    
-                    if (!jsonMatch) {
-                      throw new Error("Could not find valid JSON in response");
-                    }
 
-                    const cleanedText = jsonMatch[0].trim();
-                    JSON.parse(cleanedText); // Validate the extracted JSON
-                    return cleanedText;
+                  let geminiReview;
+                  try {
+                    // Try parsing the response directly first
+                    try {
+                      geminiReview = JSON.parse(responseText.trim());
+                    } catch (directParseError) {
+                      // If direct parsing fails, try to extract JSON
+                      const jsonRegex = /{[\s\S]*}/gm;
+                      const jsonMatch = responseText.match(jsonRegex);
+
+                      if (!jsonMatch) {
+                        throw new Error("Could not find valid JSON in response");
+                      }
+
+                      const cleanedText = jsonMatch[0].trim();
+                      geminiReview = JSON.parse(cleanedText); // Validate the extracted JSON
+                    }
+                  } catch (parseError) {
+                    console.error("Error parsing Gemini response:", parseError);
+                    throw new Error("Failed to parse Gemini response");
                   }
+                  return JSON.stringify(geminiReview);
                 } catch (error) {
                   console.error("Gemini API Error:", error);
                   throw error;
