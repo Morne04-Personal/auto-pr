@@ -9,7 +9,6 @@ jobs:
   create_pr_and_review:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       pull-requests: write
 
     steps:
@@ -131,7 +130,7 @@ jobs:
                   const genAI = new GoogleGenerativeAI(geminiApiKey);
                   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
-                  const prompt = `You are an expert code reviewer. Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Focus on identifying potential problems and providing clear, concise feedback. For each issue, include a brief explanation and mark its severity (info, suggestion, warning, or error). Provide the file path and line number for each comment. Return a clean response in this exact JSON format without any markdown code blocks or extra formatting:
+                  const prompt = `You are an expert code reviewer. Review this code diff for potential issues, bugs, security vulnerabilities, and style violations. Focus on identifying potential problems and providing clear, concise feedback. For each issue, include a brief explanation and mark its severity (info, suggestion, warning, or error). Provide the file path and line number for each comment. Aim to provide at least three comments. Return a clean response in this exact JSON format without any markdown code blocks or extra formatting:
                   {
                     "comments": [
                       {
